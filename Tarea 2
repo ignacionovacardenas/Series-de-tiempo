@@ -1,0 +1,173 @@
+####### TAREA 2 SERIES DE TIEMPO ########################
+
+cat("\014")          # clear the screen
+rm(list=ls())    			# clear the list of objects
+graphics.off()					# clear the list of graphs
+options(digits = 5)			# number of digits to display
+########################################################
+
+#install.packages("ggplot2")
+library(ggplot2)
+library(zoo)
+#fijar directorio
+setwd("C:/Users/Ignacio/Documents/Nacho/U/Primavera 2018/Series de tiempo/P2-tarea2/IN7R2")
+#leer datos
+db=read.csv("C:/Users/Ignacio/Documents/Nacho/U/Primavera 2018/Series de tiempo/P2-tarea2/IN7R2/data/data.csv", header=T,sep = ",")
+
+#Funcion que calcula los retornos diarios, ya que se tienen precios
+fRetornos=function(db){
+  vector_DSR=vector()
+  for (i in c(seq(2,11504,1))){
+    vector_DSR=c(vector_DSR,(db[i,1]/(db[i-1,1]))-1)
+  }
+  return(vector_DSR)
+}
+
+##################        PARTE A          ####################################
+
+#solo me quedo con la fecha desde 2005
+dbP1=db$SP500[8839:11504] 
+#me quedo con los retornos como data frame para visualizarlos mas facil
+retornosP1=fRetornos(as.data.frame(dbP1))
+
+#A.1
+#fijo los parametros a usar
+we_1=50
+we_2=150
+we_3=250
+Total=11503
+
+#funcion q me retorna la suma de los epsilon al cuadrado, la uso dentro de la funcion sigma
+sumEps2=function(retornos,mu){
+  v_epsilon=vector()
+  for (i in c(seq(1,length(retornos),1))){
+    eps=(retornos[i]-mu)^2
+    v_epsilon=c(v_epsilon,eps)
+  }
+  sum_eps=sum(v_epsilon)
+  return(sum_eps)
+}
+
+#funcion que me retorna un vector con las volatilidades desde we+1 hasta T+1
+sigmaMA=function(retornos,we,wt){
+  v_volatilidad=vector()
+  for (i in c(seq(we+1,we+wt,1))){
+    mu=mean(retornos[(i-we):(i-1)]) #mu para t+1
+    sumEps2=sumEps2(retornos[(i-we):(i-1)],mu)
+    v_volatilidad=c(v_volatilidad,sqrt(sumEps2/(we-1)))
+  }
+  return(v_volatilidad)
+}
+
+#encuentro los vectores para cada ventana pedida
+sigmaMA_we_1=sigmaMA(retornosP1,we_1,Total-we_1)
+sigmaMA_we_2=sigmaMA(retornosP1,we_2,Total-we_2)
+sigmaMA_we_3=sigmaMA(retornosP1,we_3,Total-we_3)
+
+#A.2
+# fijo el parametro necesario
+lambda=0.94
+
+#funcion que me retorna un vector con las volatilidades desde we+1 hasta T+1
+sigmaEWMA=function(retornos,we,wt,lambda){
+  v_volatilidad=vector()
+  for (i in c(seq(we+1,we+wt,1))){
+    if (i>(we+1)){
+      mu=mean(retornos[(i-we):(i-1)])
+      sigma_t=((1-lambda)*((mu-retornos[(i-1)])^2)+lambda*((v_volatilidad[(i-(we+1))])^2))
+      v_volatilidad=c(v_volatilidad,sqrt(sigma_t))
+    }
+    else if (i==we+1){
+      mu=mean(retornos[(i-we):(i-1)]) #mu para t+1
+      sumSigma2EWMA=sumEps2(retornos[(i-we):(i-1)],mu)
+      v_volatilidad=c(v_volatilidad,sqrt(sumSigma2EWMA/(we-1)))
+    }
+  }
+  return(v_volatilidad)
+}
+
+
+#####################       PARTE B          ############################
+#me quedo con las fechas y precios del SP500
+db=na.omit(db[,1:2])
+sp500=as.data.frame(db$SP500)
+colnames(sp500)="price"
+#se guardan los retornos diarios (los hago un dataframe para que sean más facilmente visibles)
+returns=as.data.frame(fRetornos(sp500))
+
+#B.1
+#funcion que devuelve un dataframe con todos los vectores de Var's de c/metodo
+#Vportafolio=phi de la materia
+fVaR=function(returns,we,wt,p,Vportafolio,lambda){
+  
+  var_HS=vector()
+  var_MA=vector()
+  var_EWMA=vector()
+  var_GARCH=vector()
+  
+  N_inversa=-qnorm(p, mean = 0, sd = 1, lower.tail = TRUE, log.p = FALSE)
+  v_sigmaMA=sigmaMA(returns,we,wt)
+  v_sigmaEWMA=sigmaEWMA(returns,we,wt,lambda)
+  #v_sigmaGARCH=sigmaGARCH()
+  
+  for (i in c(seq(we+1,we+wt,1))){
+    returns_aux=sort(returns[(i-we):(i-1)])
+    #sino habria q correr sobre la WE, no estoy seguro
+    var_HS=c(var_HS,returns_aux[p*(i-1)]*Vportafolio) #va a gregando el VaR diario, partiendo en la muestra 1000 hasta la última
+    
+    
+    #var usando las volatilidades sacadas con sgimaMA de la P1
+    var_MA=c(var_MA,-v_sigmaMA[(i-we)]*N_inversa*Vportafolio)
+    
+    #var_EWMA
+    var_EWMA=c(var_EWMA,-v_sigmaEWMA[(i-we)]*N_inversa*Vportafolio)
+    
+    #var_GARCH
+    #var_GARCH=c(var_GARCH,-v_sigmaGARCH[(i-we)]*N_inversa*Vportafolio)
+  }
+  vectores=data.frame(var_HS,var_MA,var_EWMA)#,var_GARCH)
+  return(vectores)
+}
+
+#seteamos los inputs de esta parte
+we_p2=1000
+wt_p2=Total-we_p2
+#lambda quedo definido desde la Parte A
+p=0.01
+vportafolio=100
+
+#usamos la funcion creada para y le entregamos los inputs que corresponden
+VaRs=fVaR(returns$`fRetornos(sp500)`,we_p2,wt_p2,p,vportafolio,lambda)
+
+#B.2
+#cfuncion que calcula los Risk Ratios
+RiskRatios=function(vectores_VaRs){
+  delta=vector()
+  for (i in c(seq(1,length(vectores_VaRs[,1]),1))){
+    maximus=max(vectores_VaRs[i,1],vectores_VaRs[i,2],vectores_VaRs[i,3])#,vectores_VaRs[i,4])
+    minimus=min(vectores_VaRs[i,1],vectores_VaRs[i,2],vectores_VaRs[i,3])#,vectores_VaRs[i,4])
+    delta=c(delta,maximus-minimus)
+  }
+  return(delta)
+}
+#se usa la funcion recien creada que devuelve el vector con los ratios
+RiskRatios=RiskRatios(VaRs)
+
+#se guarda en un data frame los Risk Ratios junto con las fechas que corresponden desde we+1 hasta el final
+grafico=data.frame(db$dates[(we_p2+1):11503],RiskRatios)
+colnames(grafico)=c("dates","RiskRatios")
+
+#B.3
+#cargamos los datos con los periodos de crisis
+crisis=read.csv("C:/Users/Ignacio/Documents/Nacho/U/Primavera 2018/Series de tiempo/P2-tarea2/IN7R2/data/events.csv", header=T,sep = ",")
+#nos quedamos solo con las crisis que corresponden al periodo para el que tenemos datos
+crisis=crisis[9:17,]
+
+#se grafican los risk ratios por fecha
+g=ggplot(grafico,mapping = aes(x=as.Date(grafico$dates,"%m/%d/%y"),y=grafico$RiskRatios))+geom_line(color="blue") + theme_gray()
+#se agregan las crisis del periodo que corresponde
+g=g + geom_rect(crisis, inherit.aes = F, mapping=aes(xmin=as.Date.character(crisis$Peak,"%Y%m%d"), xmax=as.Date.character(crisis$Trough,"%Y%m%d"), ymin=-Inf, ymax=Inf), fill='red', alpha=0.2)
+#se ajusta el grafico para facilitar el entendimiento
+g=g+labs(x = "Dates", y= "Risk Ratios", title = "Model Risk", subtitle = "SP500") + theme(plot.title = element_text(hjust = 0.5),plot.subtitle = element_text(hjust = 0.5))
+#visualizacion del grafico
+g
